@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KasirGo</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">KasirGo</div>
+    <nav>
+      <a href="#/dashboard" data-page="dashboard">Dashboard</a>
+      <a href="#/kasir" data-page="kasir">Kasir</a>
+      <a href="#/produk" data-page="produk">Produk</a>
+      <a href="#/kategori" data-page="kategori">Kategori</a>
+      <a href="#/stok" data-page="stok">Stok</a>
+      <a href="#/transaksi" data-page="transaksi">Transaksi</a>
+      <a href="#/laporan" data-page="laporan">Laporan</a>
+      <a href="#/pengaturan" data-page="pengaturan">Pengaturan</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <section id="page-dashboard" class="page"></section>
+    <section id="page-kasir" class="page"></section>
+    <section id="page-produk" class="page"></section>
+    <section id="page-kategori" class="page"></section>
+    <section id="page-stok" class="page"></section>
+    <section id="page-transaksi" class="page"></section>
+    <section id="page-laporan" class="page"></section>
+    <section id="page-pengaturan" class="page"></section>
+  </main>
+</div>
+
+<label class="theme-switch" title="Mode gelap/terang">
+  <input type="checkbox" id="theme-toggle" aria-label="Mode gelap/terang">
+  <span class="slider"></span>
+</label>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<script src="/app.js"></script>
+</body>
+</html>

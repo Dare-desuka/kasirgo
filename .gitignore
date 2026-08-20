@@ -1,0 +1,38 @@
+# Build outputs
+dist/
+*.exe
+*.apk
+
+# Local development
+/local/
+.tmp/
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Go
+*.test
+*.out
+*.prof
+
+# SQLite
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+
+# Generated
+*.syso
+*.ico
+*.png
