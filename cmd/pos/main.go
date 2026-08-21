@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/wahid/pos-go/internal/api"
@@ -84,7 +87,22 @@ func main() {
 		}
 	}
 
-	if err := http.ListenAndServe(addr, handler); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	// Graceful shutdown: SIGHUP/SIGINT/SIGTERM matikan server.
+	// Tanpa ini, tutup terminal = process orphan (PPID=1) tetap jalan.
+	srv := &http.Server{Addr: addr, Handler: handler}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-quit
+		log.Println("Server shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server: %v", err)
 	}
 }
