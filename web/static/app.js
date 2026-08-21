@@ -721,6 +721,21 @@ document.addEventListener("keydown", e => {
   if (e.key === "Enter" && inModal) { const save = $(".modal .primary"); if (save) save.click(); }
 });
 
+// ---------------- Input helpers ----------------
+// Auto kapital huruf pertama untuk input nama
+// Hapus leading zero untuk input angka
+document.addEventListener("input", e => {
+  const t = e.target;
+  if (t.tagName !== "INPUT") return;
+  if (t.id === "f-name" || t.id === "k-name" || t.id === "s-name") {
+    const v = t.value;
+    if (v && v[0] >= "a" && v[0] <= "z") t.value = v[0].toUpperCase() + v.slice(1);
+  }
+  if (t.type === "number" && t.value.length > 1 && t.value[0] === "0" && t.value[1] !== ".") {
+    t.value = t.value.replace(/^0+(?=\d)/, "");
+  }
+});
+
 // ---------------- Init ----------------
 
 (async function init() {
