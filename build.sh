@@ -16,6 +16,10 @@ build linux arm64  pos-go-linux-arm64
 build windows amd64 pos-go.exe
 build windows arm64 pos-go-arm64.exe
 
+# WebView2 (Windows only) — pure Go, no CGO, pakai Edge WebView2
+echo "==> windows/amd64 -> dist/kasirgo-webview.exe (WebView2)"
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags="-H windowsgui" -o "dist/kasirgo-webview.exe" ./cmd/kasirgo-webview
+
 echo
 echo "Done. Binaries in ./dist/"
 ls -la dist/
