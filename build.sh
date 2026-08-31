@@ -5,6 +5,33 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p dist
 
+# Generate icon dari assets/icon.jpg → .ico → .syso (kedua cmd/pos & cmd/kasirgo-webview)
+GO_WINRES=~/go/bin/go-winres
+if [[ -f assets/icon.jpg && -x "$GO_WINRES" ]]; then
+  echo "==> Generating icon from assets/icon.jpg"
+  # Convert jpg → ico multi-size (16,32,48,256)
+  magick assets/icon.jpg -resize 256x256 /tmp/_icon_256.png
+  magick assets/icon.jpg -resize 48x48 /tmp/_icon_48.png
+  magick assets/icon.jpg -resize 32x32 /tmp/_icon_32.png
+  magick assets/icon.jpg -resize 16x16 /tmp/_icon_16.png
+  magick /tmp/_icon_256.png /tmp/_icon_48.png /tmp/_icon_32.png /tmp/_icon_16.png assets/kasirgo.ico
+  rm -f /tmp/_icon_*.png
+
+  # Generate .syso untuk cmd/pos (amd64 + arm64)
+  cd cmd/pos
+  "$GO_WINRES" simply --icon ../../assets/kasirgo.ico --arch amd64,arm64 --manifest gui \
+    --product-name "KasirGo" --file-description "KasirGo POS"
+  cd ../..
+
+  # Generate .syso untuk cmd/kasirgo-webview (amd64 only)
+  cd cmd/kasirgo-webview
+  "$GO_WINRES" simply --icon ../../assets/kasirgo.ico --arch amd64 --manifest gui \
+    --product-name "KasirGo" --file-description "KasirGo POS WebView"
+  cd ../..
+
+  echo "    Icon generated: assets/kasirgo.ico + .syso files"
+fi
+
 build() {
   local os=$1 arch=$2 out=$3
   echo "==> $os/$arch -> dist/$out"

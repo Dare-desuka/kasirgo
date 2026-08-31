@@ -83,7 +83,7 @@ func main() {
 	}
 	if os.Getenv("POS_NO_SHORTCUT") == "" {
 		if exe, err := os.Executable(); err == nil {
-			ensureDesktopShortcut(exe)
+			system.EnsureDesktopShortcut(exe)
 		}
 	}
 

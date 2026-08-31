@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -41,6 +42,11 @@ func main() {
 	server := api.NewServer(app)
 	handler := web.WithStatic(server.Routes())
 
+	// Shortcut desktop Windows di first run
+	if exe, err := os.Executable(); err == nil {
+		system.EnsureDesktopShortcut(exe)
+	}
+
 	// Listen di port random
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -51,7 +57,7 @@ func main() {
 	srv := &http.Server{Handler: handler}
 	go srv.Serve(ln)
 
-	// WebView2 window — pure Go, no CGO
+	// WebView2 window — pure Go, no CGO, icon dari .syso embed
 	w := webview.NewWithOptions(webview.WebViewOptions{
 		Debug: false,
 		WindowOptions: webview.WindowOptions{

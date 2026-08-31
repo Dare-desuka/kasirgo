@@ -32,7 +32,8 @@ Thumbs.db
 *.sqlite
 *.sqlite-*
 
-# Generated
+# Generated (go-winres)
 *.syso
-*.ico
-*.pngAGENTS.md
+
+# Icon generated (sumber di assets/icon.jpg)
+assets/kasirgo.ico
