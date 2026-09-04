@@ -35,7 +35,7 @@ func main() {
 	if f := *host; f != "" {
 		hostV = f
 	}
-	portV := "8080"
+	portV := "2001" // ponytail: port tetap HP; ubah via --port/POS_PORT bila bentrok.
 	if e := os.Getenv("POS_PORT"); e != "" {
 		portV = e
 	}
@@ -63,15 +63,14 @@ func main() {
 	app.Svc = service.New(app.Repo)
 
 	server := api.NewServer(app)
+	server.Port = portV
 	handler := web.WithStatic(server.Routes())
 
 	addr := hostV + ":" + portV
 	log.Printf("Server address: %s", addr)
 	log.Printf("POS Go started\nLocal:    http://localhost:%s", portV)
-	if hostV != "127.0.0.1" {
-		for _, ip := range lanIPs() {
-			log.Printf("Network:  http://%s:%s", ip, portV)
-		}
+	for _, ip := range lanIPs() {
+		log.Printf("Network:  http://%s:%s/#/stok", ip, portV)
 	}
 
 	// Auto-buka browser (untuk user awam) + shortcut desktop Windows di first run.

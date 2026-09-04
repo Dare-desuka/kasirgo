@@ -5,13 +5,42 @@ const fmt = n => new Intl.NumberFormat("id-ID").format(n || 0);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: opts.body ? { "Content-Type": "application/json" } : {},
-    ...opts,
-  });
+  const headers = { ...(opts.body ? { "Content-Type": "application/json" } : {}), ...(opts.headers || {}) };
+  if (sessionStorage.lanPin) headers["X-LAN-PIN"] = sessionStorage.lanPin;
+  const res = await fetch(path, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
+  // ponytail: PIN hanya untuk non-localhost (server bypass loopback); desktop tak pernah kena 401.
+  if (res.status === 401 && !opts._retried) {
+    if (await askPin()) return api(path, { ...opts, _retried: true });
+    throw new Error(data.error || "PIN salah");
+  }
   if (!res.ok || data.error) throw new Error(data.error || res.statusText);
   return data;
+}
+
+let pinAsk = null;
+function askPin() {
+  if (pinAsk) return pinAsk;
+  pinAsk = new Promise(resolve => {
+    const m = modal(`
+      <h3>PIN Akses HP</h3>
+      <p class="muted">Lihat PIN di aplikasi desktop → Pengaturan → Akses HP.</p>
+      <div class="form mt"><div><label>PIN</label><input type="password" id="pin-in" inputmode="numeric" autocomplete="off" autofocus></div></div>
+      <div class="modal-actions">
+        <button id="pin-cancel">Batal</button>
+        <button class="primary" id="pin-ok">Masuk</button>
+      </div>`);
+    const done = v => { m.close(); pinAsk = null; resolve(v); };
+    $("#pin-cancel").addEventListener("click", () => done(false));
+    $("#pin-ok").addEventListener("click", async () => {
+      const pin = $("#pin-in").value;
+      const r = await fetch("/api/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) });
+      if (!r.ok) { toast("PIN salah", true); return; }
+      sessionStorage.lanPin = pin;
+      done(true);
+    });
+  });
+  return pinAsk;
 }
 
 function toast(msg, isErr = false) {
@@ -470,6 +499,7 @@ async function renderStok() {
     <h1>Stok</h1>
     <div class="toolbar">
       <input class="grow" id="stok-scan" placeholder="Scan barcode produk → buka penyesuaian stok" autocomplete="off">
+      <button id="stok-cam" style="min-height:44px">📷 Scan</button>
     </div>
     <div class="card">
       <table><tr><th>Produk</th><th>Barcode</th><th class="tnum">Stok</th><th class="tnum">Min</th><th>Satuan</th><th>Status</th><th></th></tr>
@@ -487,10 +517,12 @@ async function renderStok() {
     if (e.key !== "Enter") return;
     const q = e.target.value.trim();
     if (!q) return;
-    const r = await api("/api/products/search/" + encodeURIComponent(q));
-    if (r.error) toast(r.error, true);
-    else { openAdjust(r.id, r.stock, r.name); e.target.value = ""; }
+    try {
+      const r = await api("/api/products/search/" + encodeURIComponent(q));
+      openAdjust(r.id, r.stock, r.name); e.target.value = "";
+    } catch (err) { toast(err.message, true); }
   });
+  $("#stok-cam").addEventListener("click", openCamScan);
   const ms = await api("/api/stock/movements");
   $("#mov-table").innerHTML = `
     <table><tr><th>Waktu</th><th>Produk</th><th>Tipe</th><th class="tnum">Jumlah</th><th>Catatan</th></tr>` +
@@ -504,7 +536,7 @@ function openAdjust(id, current, name) {
     <h3>Penyesuaian Stok</h3>
     <p class="muted">${esc(name)} — stok sekarang <b>${current}</b></p>
     <div class="form mt">
-      <div><label>Penyesuaian (+/-)</label><input type="number" id="a-delta" placeholder="-2 atau +10" autofocus></div>
+      <div><label>Penyesuaian (+/-)</label><input type="number" id="a-delta" inputmode="numeric" placeholder="-2 atau +10" autofocus></div>
       <div><label>Alasan</label><input id="a-note" placeholder="Barang rusak, stok masuk …"></div>
     </div>
     <div class="modal-actions">
@@ -522,6 +554,60 @@ function openAdjust(id, current, name) {
       renderStok();
     } catch (e) { toast(e.message, true); }
   });
+}
+
+// Scan barcode browser: native BarcodeDetector saja (tanpa library).
+// Untuk scan serius pakai aplikasi HP KasirGo Stok (kamera native, tanpa flag).
+// ponytail: tanpa dependency, tanpa bundel; browser yang tak dukung diarahkan ke APK.
+async function openCamScan() {
+  const m = modal(`
+    <h3>Scan Barcode</h3>
+    <p class="muted" id="cam-status">Mengaktifkan kamera…</p>
+    <video id="cam-video" class="cam-video" playsinline muted></video>
+    <div class="form mt">
+      <div><label>atau foto barcode</label><input type="file" id="cam-file" accept="image/*" capture="environment"></div>
+    </div>
+    <div class="modal-actions"><button id="cam-close">Tutup</button></div>`);
+  const video = $("#cam-video"), status = $("#cam-status");
+  const formats = ["ean_13", "ean_8", "upc_a", "code_128", "qr_code"];
+  if (!("BarcodeDetector" in window)) {
+    status.textContent = "Browser ini tak mendukung scan — pakai aplikasi HP KasirGo Stok.";
+    return;
+  }
+  let stream = null, timer = null;
+  const stop = () => { clearInterval(timer); stream?.getTracks().forEach(t => t.stop()); };
+  $("#cam-close").addEventListener("click", () => { stop(); m.close(); });
+  const found = async code => {
+    stop(); m.close();
+    try {
+      const r = await api("/api/products/search/" + encodeURIComponent(code));
+      openAdjust(r.id, r.stock, r.name);
+    } catch (e) { toast(e.message, true); }
+  };
+  $("#cam-file").addEventListener("change", async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      const rs = await new BarcodeDetector({ formats }).detect(await createImageBitmap(f));
+      if (rs[0]?.rawValue) found(rs[0].rawValue);
+      else toast("Barcode tak terbaca dari foto", true);
+    } catch (err) { toast(err.message || "Barcode tak terbaca", true); }
+  });
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream;
+    await video.play();
+    status.textContent = "Arahkan kamera ke barcode…";
+    const det = new BarcodeDetector({ formats });
+    timer = setInterval(async () => {
+      try {
+        const rs = await det.detect(video);
+        if (rs[0]?.rawValue) found(rs[0].rawValue);
+      } catch (_) { /* abaikan frame gagal */ }
+    }, 500);
+  } catch (_) {
+    status.textContent = "Kamera tak bisa dibuka — pakai foto di atas atau aplikasi HP KasirGo Stok.";
+  }
 }
 
 // ---------------- Transaksi ----------------
@@ -645,6 +731,14 @@ async function renderPengaturan() {
         <button class="primary mt" onclick="saveSettings()">Simpan</button>
       </div>
       <div class="card">
+        <h2>Akses HP (WiFi sama)</h2>
+        <p class="muted">Buka alamat ini di browser HP. Alamat selalu ikut IP laptop sekarang — kalau IP berubah, refresh halaman ini.</p>
+        <div id="lan-urls" class="mt"><p class="muted">Memuat alamat…</p></div>
+        <div class="mt"><label>PIN Akses HP (kosong = bebas)</label><input type="text" id="s-pin" inputmode="numeric" value="${esc(s.lan_pin || "")}" autocomplete="off" placeholder="mis. 1234"></div>
+        <p class="muted" id="pin-status"></p>
+        <button class="primary mt" onclick="savePin()">Simpan PIN</button>
+      </div>
+      <div class="card">
         <h2>Data Transaksi</h2>
         <p class="muted">Hapus data transaksi (beserta item & gerak stoknya). Stok produk tidak dikembalikan.</p>
         <div class="row mt">
@@ -664,13 +758,42 @@ async function renderPengaturan() {
         </div>
       </div>
     </div>`;
+  refreshPinStatus();
+  api("/api/network").then(n => {
+    const el = $("#lan-urls");
+    if (!el) return;
+    el.innerHTML = n.urls?.length
+      ? n.urls.map(u => `<div class="big-url">${esc(u)}</div>`).join("")
+      : `<p class="muted">Tidak ada IP LAN — sambungkan laptop ke WiFi dulu.</p>`;
+  }).catch(() => {
+    const el = $("#lan-urls");
+    if (el) el.innerHTML = `<p class="muted">Gagal memuat alamat.</p>`;
+  });
+}
+
+// ponytail: PIN punya tombol sendiri agar tak dikira ikut Simpan toko; status dibaca dari settings.
+function refreshPinStatus() {
+  const el = $("#pin-status");
+  if (!el) return;
+  el.textContent = settings.lan_pin
+    ? `PIN tersimpan: ${settings.lan_pin} — HP wajib isi PIN ini.`
+    : "Tanpa PIN — semua HP satu WiFi bisa langsung masuk.";
+}
+
+async function savePin() {
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ lan_pin: $("#s-pin").value }) });
+    settings = { ...settings, lan_pin: $("#s-pin").value };
+    refreshPinStatus();
+    toast("PIN disimpan — berlaku langsung, tanpa restart");
+  } catch (e) { toast(e.message, true); }
 }
 
 async function saveSettings() {
   const body = {
     store_name: $("#s-name").value, store_address: $("#s-addr").value,
     store_phone: $("#s-phone").value, currency: $("#s-currency").value,
-    receipt_footer: $("#s-footer").value,
+    receipt_footer: $("#s-footer").value, lan_pin: $("#s-pin")?.value ?? settings.lan_pin ?? "",
   };
   try { await api("/api/settings", { method: "PUT", body: JSON.stringify(body) }); settings = body; toast("Pengaturan disimpan"); }
   catch (e) { toast(e.message, true); }

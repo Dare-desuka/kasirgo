@@ -155,6 +155,24 @@ func (r *Repository) CreateProduct(p *models.Product) (*models.Product, error) {
 	if err := validateProduct(p); err != nil {
 		return nil, err
 	}
+	// ponytail: barcode bekas produk terhapus bisa dipakai lagi — baris soft-delete
+	// dihidupkan ulang (UNIQUE tak kenal deleted_at, jadi insert polos selalu 400).
+	if bc := strings.TrimSpace(p.Barcode); bc != "" {
+		var id int64
+		if err := r.db.QueryRow(`SELECT id FROM products WHERE barcode = ? AND deleted_at IS NOT NULL`, bc).Scan(&id); err == nil {
+			if _, err := r.db.Exec(`UPDATE products SET sku = ?, name = ?, category_id = ?,
+				purchase_price = ?, selling_price = ?, stock = ?, minimum_stock = ?, unit = ?,
+				deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`,
+				nullableStr(p.SKU), strings.TrimSpace(p.Name), p.CategoryID,
+				p.PurchasePrice, p.SellingPrice, p.Stock, p.MinimumStock, defaultStr(p.Unit, "pcs"), id); err != nil {
+				return nil, fmt.Errorf("insert product: %w", err)
+			}
+			if p.Stock != 0 {
+				_ = r.AddStockMovement(id, "adjustment", p.Stock, nil, "stok awal")
+			}
+			return r.GetProduct(id)
+		}
+	}
 	res, err := r.db.Exec(`INSERT INTO products
 		(barcode, sku, name, category_id, purchase_price, selling_price, stock, minimum_stock, unit)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,6 +30,9 @@ type App struct {
 
 type Server struct {
 	app *App
+	// Port tampil di /api/network agar IP+port di Pengaturan selalu sesuai
+	// dengan port server yang sedang jalan. Diisi dari main (flag/env).
+	Port string
 }
 
 func NewServer(app *App) *Server {
@@ -70,7 +74,96 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/backup/download", s.handleBackup)
 	mux.HandleFunc("POST /api/restore", s.handleRestore)
 
-	return mux
+	mux.HandleFunc("GET /api/network", s.handleNetwork)
+	mux.HandleFunc("POST /api/unlock", s.handleUnlock)
+
+	return s.requireLANPin(mux)
+}
+
+// requireLANPin mengunci /api/* untuk akses non-localhost dengan PIN.
+// Desktop (loopback) selalu bebas PIN; HP (LAN) wajib header X-LAN-PIN.
+// PIN kosong = tanpa kunci (backward compat).
+// ponytail: 1 PIN global, bukan akun per-user; tambah user+session kalau butuh audit.
+func (s *Server) requireLANPin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") ||
+			r.URL.Path == "/api/unlock" || r.URL.Path == "/api/health" ||
+			isLoopback(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if want := s.lanPIN(); want != "" && r.Header.Get("X-LAN-PIN") != want {
+			writeErr(w, http.StatusUnauthorized, "PIN akses HP salah atau belum diisi")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) lanPIN() string {
+	if e := os.Getenv("POS_PIN"); e != "" {
+		return e
+	}
+	v, _ := s.app.Repo.GetSetting("lan_pin")
+	return v
+}
+
+func isLoopback(r *http.Request) bool {
+	h, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		h = r.RemoteAddr
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// handleNetwork mengembalikan IP LAN + port server saat ini (live, tidak disimpan)
+// agar yang tampil di Pengaturan selalu sesuai IP laptop sekarang.
+func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request) {
+	port := s.Port
+	if port == "" {
+		port = os.Getenv("POS_PORT")
+	}
+	if port == "" {
+		port = "2001"
+	}
+	ips := lanIPs()
+	urls := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		urls = append(urls, "http://"+ip+":"+port+"/#/stok")
+	}
+	writeJSON(w, 200, map[string]any{"port": port, "ips": ips, "urls": urls})
+}
+
+func lanIPs() []string {
+	var out []string
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return out
+	}
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok {
+			ip := ipn.IP.To4()
+			if ip != nil && !ip.IsLoopback() {
+				out = append(out, ip.String())
+			}
+		}
+	}
+	return out
+}
+
+func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Pin string `json:"pin"`
+	}
+	if decode(w, r, &body) != nil {
+		return
+	}
+	if want := s.lanPIN(); want != "" && body.Pin != want {
+		writeErr(w, http.StatusUnauthorized, "PIN salah")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
 // ---------- helpers ----------
@@ -336,7 +429,7 @@ func (s *Server) handleStockReport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	kv := map[string]string{}
-	for _, key := range []string{"store_name", "store_address", "store_phone", "currency", "receipt_footer"} {
+	for _, key := range []string{"store_name", "store_address", "store_phone", "currency", "receipt_footer", "lan_pin"} {
 		v, err := s.app.Repo.GetSetting(key)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "gagal memuat setting")

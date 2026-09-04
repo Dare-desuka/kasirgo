@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -47,12 +46,13 @@ func main() {
 		system.EnsureDesktopShortcut(exe)
 	}
 
-	// Listen di port random
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// ponytail: selalu 0.0.0.0:2001 (sama dgn pos-go) agar HP bisa konek;
+	// window desktop tetap lewat loopback (bebas PIN), HP wajib PIN via middleware.
+	ln, err := net.Listen("tcp", "0.0.0.0:2001")
 	if err != nil {
-		log.Fatalf("listen: %v", err)
+		log.Fatalf("listen 0.0.0.0:2001: %v (port dipakai aplikasi lain?)", err)
 	}
-	actualPort := ln.Addr().(*net.TCPAddr).Port
+	server.Port = "2001"
 
 	srv := &http.Server{Handler: handler}
 	go srv.Serve(ln)
@@ -72,7 +72,7 @@ func main() {
 	}
 	defer w.Destroy()
 
-	w.Navigate(fmt.Sprintf("http://127.0.0.1:%d", actualPort))
+	w.Navigate("http://127.0.0.1:2001")
 	w.Run()
 
 	// Tutup window → shutdown server
